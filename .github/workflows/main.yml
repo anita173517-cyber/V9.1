@@ -1,0 +1,71 @@
+name: Build UltraTV Pro v6 Next-Gen 3D APK
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Locate or extract UltraTV Pro ZIP
+        id: locate
+        run: |
+          if [ -f "settings.gradle.kts" ]; then
+            echo "proj_dir=." >> $GITHUB_OUTPUT
+          else
+            ZIP_FILE=$(ls -1 *.zip 2>/dev/null | sort -V | tail -n 1 || true)
+            if [ -n "$ZIP_FILE" ]; then
+              echo "Found ZIP: $ZIP_FILE"
+              mkdir -p extracted_proj
+              unzip -q -o "$ZIP_FILE" -d extracted_proj
+              FOUND=$(find extracted_proj -name "settings.gradle.kts" -maxdepth 3 | head -n 1)
+              if [ -z "$FOUND" ]; then
+                echo "settings.gradle.kts not found inside $ZIP_FILE!"
+                exit 1
+              fi
+              echo "proj_dir=$(dirname "$FOUND")" >> $GITHUB_OUTPUT
+            else
+              echo "No settings.gradle.kts or ZIP found in repository root!"
+              exit 1
+            fi
+          fi
+
+      - name: Configure preinstalled Android SDK
+        run: |
+          SDK_ROOT="/usr/local/lib/android/sdk"
+          yes | "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses || true
+          "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0"
+          echo "sdk.dir=$SDK_ROOT" > "${{ steps.locate.outputs.proj_dir }}/local.properties"
+
+      - name: Setup Gradle 8.13
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+
+      - name: Build Release & Debug APKs
+        working-directory: ${{ steps.locate.outputs.proj_dir }}
+        run: |
+          gradle assembleRelease assembleDebug --no-daemon --no-configuration-cache
+
+      - name: Upload Release APK (Recommended for TV)
+        uses: actions/upload-artifact@v4
+        with:
+          name: UltraTV_Pro_v6_NextGen3D_Release_APK
+          path: ${{ steps.locate.outputs.proj_dir }}/app/build/outputs/apk/release/*.apk
+
+      - name: Upload Debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: UltraTV_Pro_v6_NextGen3D_Debug_APK
+          path: ${{ steps.locate.outputs.proj_dir }}/app/build/outputs/apk/debug/*.apk
